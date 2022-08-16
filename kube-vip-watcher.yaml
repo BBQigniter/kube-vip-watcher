@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-vip-watcher
+  namespace: monitoring
+  labels:
+    app: kube-vip-watcher
+spec:
+  # no need to run it multiple times but it can - shouldn't really be a problem!
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-vip-watcher
+  template:
+    metadata:
+      labels:
+        app: kube-vip-watcher
+    spec:
+      containers:
+      - image: my-repo.local.home/sys/kube-vip-watcher:v0.07
+        name: kube-vip-watcher
+        livenessProbe:
+          failureThreshold: 3
+          exec:
+            command:
+            - /opt/script/kube-vip-watcher/healthchecks/liveness.py
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 2
+        readinessProbe:
+          failureThreshold: 3
+          exec:
+            command:
+            - /opt/script/kube-vip-watcher/healthchecks/readiness.py
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          successThreshold: 2
+          timeoutSeconds: 2
+        resources:
+          requests:
+            memory: 64Mi
+            cpu: 0.1
+          limits:
+            # so the workload cannot take all the resources if something goes wrong
+            memory: 128Mi
+            cpu: 1
+      serviceAccountName: kube-vip-watcher
+      imagePullSecrets:
+      - name: my-repo-secret
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-vip-watcher
+rules:
+- apiGroups:
+  - ""  # "" indicates the core API group
+  - "coordination.k8s.io"
+  resources:
+  - pods
+  - namespaces
+  - services
+  - leases
+  - nodes/status
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""  # "" indicates the core API group
+  - "coordination.k8s.io"
+  resources:
+  - services
+  - leases
+  verbs:
+  - create
+  - update
+  - patch
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-vip-watcher
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-vip-watcher
+subjects:
+- kind: ServiceAccount
+  name: kube-vip-watcher
+  namespace: monitoring
+roleRef:
+  kind: ClusterRole
+  name: kube-vip-watcher
+  apiGroup: rbac.authorization.k8s.io
