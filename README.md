@@ -36,7 +36,8 @@ Create the partitions needed as configured in the corresponding yaml manifest-pa
 
 A simple echoserver example.
 
-# Known Issues
+# Known Issues/Todos
 
 * possibly a few test-cases are not covered
-* better logging needed
+* better logging needed (e.g. if service-account-token is incorrect/missing)
+* implement new service-account-token see https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
