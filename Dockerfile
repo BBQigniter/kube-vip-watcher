@@ -2,13 +2,14 @@ FROM python:3.10.5-slim-buster
 
 # install a few things we need for running this stuff or could be used for debugging
 RUN apt-get update && apt-get install -y vim procps curl
-RUN pip install kubernetes psutil --disable-pip-version-check --no-cache-dir
+RUN pip install kubernetes psutil coloredlogs --disable-pip-version-check --no-cache-dir
 
 RUN mkdir -p /opt/script/kube-vip-watcher/healthchecks
 ADD kube-vip-watcher.py /opt/script/kube-vip-watcher/
 RUN chmod +x /opt/script/kube-vip-watcher/kube-vip-watcher.py
 ADD healthchecks/* /opt/script/kube-vip-watcher/healthchecks/
 RUN chmod +x /opt/script/kube-vip-watcher/healthchecks/*.py
+ADD lib/* /opt/script/kube-vip-watcher/lib/
 
 # Add the user UID:1000, GID:1000, home at /app
 RUN groupadd -r kube-vip-watcher -g 1000 && \

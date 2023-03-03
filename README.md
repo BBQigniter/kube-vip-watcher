@@ -11,8 +11,9 @@ defined node and moves the VIP.
 This particularily can be useful for pods where the services need kube-vip's `externalTrafficPolicy: Local` option configured. And
 for better loadbalancing to pods (exposed with multiple VIPs - ergo RR-DNS) running on different nodes.
 
-> It can take up to about 20 seconds until traffic reaches a local-pod after failover. I assume this is in connection to default ARP-timeout
-settings.
+> `kube-vip` itself must be running with the flag `svc_election` set to `true` 
+
+Tested with kube-vip version up to v0.5.10 - so far I've seen no real problems.
 
 ## Workload examples
 
@@ -36,8 +37,99 @@ Create the partitions needed as configured in the corresponding yaml manifest-pa
 
 A simple echoserver example.
 
-# Known Issues/Todos
+# Known Issues
 
 * possibly a few test-cases are not covered
-* better logging needed (e.g. if service-account-token is incorrect/missing)
-* implement new service-account-token see https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
+* currently all logs are written to console, so if you send logs via syslog too and scrape logs of pods - logs might be duplicated
+
+# Libraries for Logging and Locking
+
+One of my first "modules", it works, but can certainly be done better.
+
+## Prerequisites
+
+### cplogging.py
+If you want to use it as standalone plugin, following Pyhton modules are needed:
+
+    pip install coloredlogs 
+
+### lockJob.py
+If you want to use it you need the cplogging.py. Besides this plugin uses also a
+few settings from `settings.py`
+
+## Examples
+Have a look at the `example.py` it's well documented
+
+## settings.py
+Used for defining default log-values. They can be overridden in your main-program
+See `example.py` for more info
+
+# Additional Notes
+
+## Filebeat autodiscover-example
+
+If you are using Filebeat for scraping the Kubernetes-pods, you might add something 
+like this to your autodiscover-section, if you set logging to be in JSON-format.
+
+```
+...
+autodiscover:
+  providers:
+  - type: kubernetes
+    node: ${NODE_NAME}
+    templates:
+      ...
+      # we scrape "ingress-nginx" logs and use the special available module
+      - condition:
+          equals:
+            kubernetes.labels.app_kubernetes_io/name: "ingress-nginx"
+        config:
+          - module: nginx
+            ingress_controller:
+              input:
+                type: container
+                stream: stdout
+                paths:
+                  - /var/log/containers/*${data.kubernetes.container.id}.log
+            error:
+              input:
+                type: container
+                stream: stderr
+                paths:
+                  - /var/log/containers/*${data.kubernetes.container.id}.lo
+      # this will make filebeat scrape the "kube-vip-watcher"-logs and decode the JSON-message
+      - condition:
+          equals:
+            kubernetes.container.name: "kube-vip-watcher"
+        config:
+          - type: container
+            paths:
+              - "/var/log/containers/*${data.kubernetes.container.id}.log"
+            processors:
+              - decode_json_fields:
+                  fields: ["message"]
+                  max_depth: 3
+                  target: ""
+                  overwrite_keys: true
+      # fallback "condition" - scrape everything else as normal container
+      - condition.and:
+          ...
+          # we explicitly set a rule for "ingress-nginx"
+          - not.equals:
+              kubernetes.labels.app_kubernetes_io/name: "ingress-nginx"
+          # we explicitly set a rule for kube-vip-watcher
+          - not.equals:
+              kubernetes.container.name: "kube-vip-watcher"
+        config:
+          - type: container
+            paths:
+              - "/var/log/containers/*${data.kubernetes.container.id}.log"
+...
+```
+
+# Changelog
+
+* v0.07 - initial release
+* v0.08 - 2023-02-20
+  - added better logging for easier debugging
+  - fixed restarting of pods via adding reconnect-handling inside the script
