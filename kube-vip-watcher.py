@@ -47,7 +47,6 @@ v1_coordination = client.CoordinationV1Api()
 
 w = watch.Watch()
 
-
 def check_node_state(node_name):
     logger_name = "check_node_state"
     logger = Cplogging(logger_name)
@@ -76,6 +75,7 @@ def check_node_state(node_name):
 def check_container_state(pod_container_statuses):
     logger_name = "check_container_state"
     logger = Cplogging(logger_name)
+    logger.debug(pod_container_statuses)
     number_of_containers = len(pod_container_statuses)
     ready_containers = 0
 
@@ -142,10 +142,10 @@ def get_namespaced_leases(service_name, namespace):
         lease = v1_coordination.read_namespaced_lease("kubevip-" + service_name, namespace)
         lease_name = lease.metadata.name
         lease_holder = lease.spec.holder_identity
-        logger.info("Lease: %s - Node: %s" % (lease_name, lease_holder))
+        logger.info("Service: %s - Lease: %s - Node: %s" % (service_name, lease_name, lease_holder))
         return lease_holder
     except:
-        logger.warning("No Lease kubevip-%s found" % service_name)
+        logger.warning("Service: %s - No Lease kubevip-%s found" % (service_name, service_name))
         return None
     # endtry
 # enddef
@@ -184,14 +184,19 @@ def get_namespaced_pods_with_label_on_node(namespace, pod_labels_app, pod_node_n
 def balance(list_of_services, pod_container_statuses, pod_node_name, pod_labels_app):
     logger_name = "balance"
     logger = Cplogging(logger_name)
-    if len(list_of_services) == 0:
-        logger.warning("No service(s) found with needed app-label")
+    number_of_services = len(list_of_services)
+    service_counter = 0
+    if number_of_services == 0:
+        logger.error("No service(s) found with needed app-label")
         return False  # end def
     else:
         for service in list_of_services:
+            service_name = service.metadata.name
+            service_counter += 1
+            # logger.info("service_count: %d" % service_counter)
+
             try:
                 # get the value of annotation 'kubeVipBalancePriority' and other values
-                service_name = service.metadata.name
                 namespace = service.metadata.namespace
                 load_balancer_ip = service.spec.load_balancer_ip
                 try:
@@ -204,104 +209,157 @@ def balance(list_of_services, pod_container_statuses, pod_node_name, pod_labels_
                 balance_priority_order = [sub_element.strip() for sub_element in balance_priority_order]  # remove whitespaces for each element in the list fixed_section
                 logger.info("Service: %s - Balance Priority: %s - Traffic Policy: %s - Loadbalancer-IP: %s" % (service_name, balance_priority_order, traffic_policy, load_balancer_ip))
             except:
-                logger.warning("Service missing annotation 'kubeVipBalancePriority'")
-                return False  # end def
+                logger.warning("Service: %s - Service missing annotation 'kubeVipBalancePriority'" % service_name)
+
+                # check if we need to continue with next service
+                if number_of_services == service_counter:
+                    return False  # end def
+                else:
+                    continue  # check next service
+                # endif
             # endtry
 
             try:
                 lease_holder = get_namespaced_leases(service_name, namespace)
 
-                # no we check if pod is running and if the lease_holder is corresponding to the first node in the priority list
+                # now we check if pod is running and if the lease_holder is corresponding to the first node in the priority list
                 # if not we patch the holder-value in the lease after checking that the node to swtich to is available and has a running pod
+                # TODO: find better way to check if rebalancing is really needed :| - currently we patch the lease in some cases even though it's not really needed
                 if lease_holder == balance_priority_order[0] and check_container_state(pod_container_statuses) and check_node_state(pod_node_name):
-                    logger.info("Lease holder OK and pod's containers are ready")
-                    return True  # end def
+                    logger.info("Service: %s - Current lease holder OK and pod's containers are ready" % service_name)
+
+                    # check if we need to continue with next service
+                    if number_of_services == service_counter:
+                        return True  # end def
+                    else:
+                        continue  # check next service
+                    # endif
                 else:
-                    logger.warning("Detected wrong lease holder, issues with pod's containers or the node - further checking if VIP must be moved")
+                    logger.warning("Service: %s - Detected wrong lease holder OR issues with pod's containers OR the node - further checking if VIP must be moved" % service_name)
+
+                    service_ok = False
                     for node in balance_priority_order:
-                        # check if node is available and ready
-                        if check_node_state(node):
-                            # check if another pod with same app-label is running - this would mean no VIP must be moved
-                            try:
-                                list_of_pods_on_node = get_namespaced_pods_with_label_on_node(namespace, pod_labels_app, node)
+                        # we now go through the nodes until we find a suitable pod
+                        if not service_ok:
+                            # check if node is available and ready
+                            if check_node_state(node):
+                                # check if another pod with same app-label is running - this would mean no VIP must be moved
+                                try:
+                                    list_of_pods_on_node = get_namespaced_pods_with_label_on_node(namespace, pod_labels_app, node)
 
-                                # check if at least one ready pod was found
-                                if len(list_of_pods_on_node) >= 1:
-                                    for pod in list_of_pods_on_node:
-                                        """
-                                        logger.debug(pod)
-                                        try:
-                                            pod_deletion_timestamp = pod.metadata.deletion_timestamp
-                                            logger.debug("pod deletion event detected: %s" % str(pod_deletion_timestamp))
-                                        except:
-                                            logger.debug("pod_deletion not found")
-                                            logger.debug(item)
-                                            pod_deletion_timestamp = None
-                                        """
-
-                                        # if the pod is on the same node where the other failed and the remaining pod is healthy, the VIP doesn't need to be moved
-                                        if check_container_state(pod.status.container_statuses) \
-                                                and pod.spec.node_name == pod_node_name \
-                                                and lease_holder == balance_priority_order[0]:
-                                            logger.info("Found healthy pod %s on node %s. Lease holder OK and no need to move VIP" % (pod.metadata.name, pod.spec.node_name))
-                                            return True  # end def
-                                        elif check_container_state(pod.status.container_statuses):  # else move the VIP to the node
-                                            # optional possible to only move if really needed with:
-                                            # if traffic_policy == "Local":  # and indent code below a little
-                                            # We have found another ready pod on another node - we have to update the lease and the service manifest
+                                    # check if at least one ready pod was found
+                                    if len(list_of_pods_on_node) >= 1:
+                                        for pod in list_of_pods_on_node:
+                                            """
+                                            logger.debug(pod)
                                             try:
-                                                # we have to use "holderIdentity" instead of "holder_identity"
-                                                lease_body_patch = {"spec": {"holderIdentity": node}}
-                                                lease_patch_response = v1_coordination.patch_namespaced_lease("kubevip-" + service.metadata.name, namespace, lease_body_patch)
-                                            except Exception as e:
-                                                logger.error("Exception when calling CoordinationV1Api->patch_namespaced_lease: %s\n" % e)
-                                                sys.exit(1)
-                                            # endtry
+                                                pod_deletion_timestamp = pod.metadata.deletion_timestamp
+                                                logger.debug("pod deletion event detected: %s" % str(pod_deletion_timestamp))
+                                            except:
+                                                logger.debug("pod_deletion not found")
+                                                logger.debug(item)
+                                                pod_deletion_timestamp = None
+                                            """
 
-                                            try:
-                                                # if we do not patch this value kube-vip removes the VIP sometimes completely for about a minute
-                                                service_body_patch = {"metadata": {"annotations": {"kube-vip.io/vipHost": node}}}
-                                                service_patch_response = v1_core.patch_namespaced_service(service.metadata.name, namespace, service_body_patch)
-                                            except Exception as e:
-                                                logger.error("Exception when calling CoreV1Api->patch_namespaced_service: %s\n" % e)
-                                                sys.exit(1)
-                                            # endtry
+                                            # if the pod is on the same node where the other failed and the remaining pod is healthy, the VIP doesn't need to be moved
+                                            if check_container_state(pod.status.container_statuses) \
+                                                    and pod.spec.node_name == pod_node_name \
+                                                    and lease_holder == balance_priority_order[0]:
+                                                logger.info("Service: %s - Found healthy pod %s on node %s. Current lease holder OK and no need to move VIP" % (service_name, pod.metadata.name, pod.spec.node_name))
 
-                                            if node == balance_priority_order[0]:
-                                                logger.info("HOLDER CHANGED TO PRIMARY NODE %s and service's annotation 'kube-vip.io/vipHost' updated to %s" % (
-                                                    lease_patch_response.spec.holder_identity,
-                                                    service_patch_response.metadata.annotations['kube-vip.io/vipHost'])
-                                                )
-                                                return True  # end def
-                                            else:
-                                                logger.warning("HOLDER CHANGED TO ALTERNATIVE NODE %s and service's annotation 'kube-vip.io/vipHost' updated to %s" % (
-                                                    lease_patch_response.spec.holder_identity,
-                                                    service_patch_response.metadata.annotations['kube-vip.io/vipHost'])
-                                                )
-                                                return True  # end def
+                                                # check if we need to continue with next service
+                                                if number_of_services == service_counter:
+                                                    return True  # end def
+                                                else:
+                                                    service_ok = True
+                                                    break  # get out of "pod-check loop" and check next service
+                                                # endif
+                                            elif check_container_state(pod.status.container_statuses):  # else move the VIP to the node
+                                                # optional possible to only move if really needed with:
+                                                # if traffic_policy == "Local":  # and indent code below a little
+                                                # We have found another ready pod on another node - we have to update the lease and the service manifest
+                                                try:
+                                                    # we have to use "holderIdentity" instead of "holder_identity"
+                                                    lease_body_patch = {"spec": {"holderIdentity": node}}
+                                                    lease_patch_response = v1_coordination.patch_namespaced_lease("kubevip-" + service.metadata.name, namespace, lease_body_patch)
+                                                except Exception as e:
+                                                    logger.error("Exception when calling CoordinationV1Api->patch_namespaced_lease: %s\n" % e)
+                                                    sys.exit(1)
+                                                # endtry
+
+                                                try:
+                                                    # if we do not patch this value kube-vip removes the VIP sometimes completely for about a minute
+                                                    service_body_patch = {"metadata": {"annotations": {"kube-vip.io/vipHost": node}}}
+                                                    service_patch_response = v1_core.patch_namespaced_service(service.metadata.name, namespace, service_body_patch)
+                                                except Exception as e:
+                                                    logger.error("Exception when calling CoreV1Api->patch_namespaced_service: %s\n" % e)
+                                                    sys.exit(1)
+                                                # endtry
+
+                                                if node == balance_priority_order[0]:
+                                                    logger.info("Service: %s - HOLDER CHANGED TO PRIMARY NODE %s and service's annotation 'kube-vip.io/vipHost' updated to %s" % (
+                                                        service_name,
+                                                        lease_patch_response.spec.holder_identity,
+                                                        service_patch_response.metadata.annotations['kube-vip.io/vipHost'])
+                                                    )
+
+                                                    # check if we need to continue with next service
+                                                    if number_of_services == service_counter:
+                                                        return True  # end def
+                                                    else:
+                                                        service_ok = True
+                                                        break  # get out of "pod-check loop" and check next service
+                                                    # endif
+                                                else:
+                                                    logger.warning("Service: %s - HOLDER CHANGED TO ALTERNATIVE NODE %s and service's annotation 'kube-vip.io/vipHost' updated to %s" % (
+                                                        service_name,
+                                                        lease_patch_response.spec.holder_identity,
+                                                        service_patch_response.metadata.annotations['kube-vip.io/vipHost'])
+                                                    )
+
+                                                    # check if we need to continue with next service
+                                                    if number_of_services == service_counter:
+                                                        return True  # end def
+                                                    else:
+                                                        service_ok = True
+                                                        break  # get out of "pod-check loop" and check next service
+                                                    # endif
+                                                # endif
+                                                # optional possible to only move if really needed with:
+                                                # else:
+                                                #     logger.info("Traffic-Policy not 'Local' and node %s available so no need to move VIP" % node)
+                                                # endif
                                             # endif
-                                            # optional possible to only move if really needed with:
-                                            # else:
-                                            #     logger.info("Traffic-Policy not 'Local' and node %s available so no need to move VIP" % node)
-                                            # endif
-                                        # endif
-                                    # endfor
-                                else:
-                                    logger.info("No remaining pods on node found - continuing with search for suitable node with healthy pods.")
-                                # endif
-                            except Exception as e:
-                                logger.error("Exception when calling get_namespaced_pods_with_label_on_node: %s\n" % e)
-                            # endtry
+                                        # endfor
+                                    else:
+                                        logger.info("Service: %s - No remaining pods on node found - continuing with search for suitable node with healthy pods." % service_name)
+                                    # endif
+                                except Exception as e:
+                                    logger.error("Exception when calling get_namespaced_pods_with_label_on_node: %s\n" % e)
+                                # endtry
+                            else:
+                                logger.info("Service: %s - Node %s not available - continuing with search for suitable node with healthy pods." % (service_name, node))
+                            # endif
                         else:
-                            logger.info("Node %s not available - continuing with search for suitable node with healthy pods." % node)
+                            # check if we need to continue with next service
+                            if number_of_services == service_counter:
+                                return True  # end def
+                            else:
+                                break  # get out of "node-check loop" and check next service
+                            # endif
                         # endif
                     else:
-                        logger.warning("No suitable node found")
-                        return False  # end def
+                        # check if we need to continue with next service
+                        if number_of_services == service_counter:
+                            logger.error("Service: %s - No suitable node found" % service_name)
+                            return False  # end def
+                        else:
+                            continue  # check next service
+                        # endif
                     # endfor
                 # endif
             except:
-                logger.warning("No Lease kubevip-%s found" % service.metadata.name)
+                logger.warning("Service: %s - No Lease kubevip-%s found" % service.metadata.name)
                 return False
             # endtry
         # endfor

@@ -13,7 +13,7 @@ for better loadbalancing to pods (exposed with multiple VIPs - ergo RR-DNS) runn
 
 > `kube-vip` itself must be running with the flag `svc_election` set to `true` 
 
-Tested with kube-vip version up to v0.5.10 - so far I've seen no real problems.
+Tested with kube-vip version up to v0.5.11 - so far I've seen no real problems.
 
 ## Workload examples
 
@@ -41,6 +41,8 @@ A simple echoserver example.
 
 * possibly a few test-cases are not covered
 * currently all logs are written to console, so if you send logs via syslog too and scrape logs of pods - logs might be duplicated
+* the watcher is not yet working with new `kube-vip.io/loadbalancerIPs` annotation instead of `service.spec.loadbalancerIP`
+* find better way to check if rebalancing is really needed :| - currently we patch the lease in some cases even though it's not really needed
 
 # Libraries for Logging and Locking
 
@@ -133,3 +135,6 @@ autodiscover:
 * v0.08 - 2023-02-20
   - added better logging for easier debugging
   - fixed restarting of pods via adding reconnect-handling inside the script
+* v0.09 - 2023-05-09
+  - fixed balancing for multiple services pointing to same workload with different VIPs
+  - improved logging output a little bit
