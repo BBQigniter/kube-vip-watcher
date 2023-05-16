@@ -48,6 +48,7 @@ metadata:
     app: echoserver
   annotations:
     kubeVipBalancePriority: "vkube-4, vkube-6, vkube-5"
+    kube-vip.io/loadbalancerIPs: "10.115.199.125"
 spec:
   ports:
   - name: echosrv-http

@@ -17,7 +17,7 @@ spec:
         app: kube-vip-watcher
     spec:
       containers:
-      - image: my-repo.home.arpa/kube-vip-watcher:v0.08
+      - image: my-repo.home.arpa/kube-vip-watcher:v0.10
         name: kube-vip-watcher
         livenessProbe:
           failureThreshold: 3

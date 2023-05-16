@@ -134,6 +134,7 @@ metadata:
     app: logstash-buffer
   annotations:
     kubeVipBalancePriority: "vkube-4, vkube-5, vkube-6"
+    kube-vip.io/loadbalancerIPs: "10.115.199.122"
 spec:
   ports:
   - port: 514
@@ -160,6 +161,7 @@ metadata:
     app: logstash-buffer
   annotations:
     kubeVipBalancePriority: "vkube-5, vkube-6, vkube-4"
+    kube-vip.io/loadbalancerIPs: "10.115.199.123"
 spec:
   ports:
   - port: 514
@@ -186,6 +188,7 @@ metadata:
     app: logstash-buffer
   annotations:
     kubeVipBalancePriority: "vkube-6, vkube-4, vkube-5"
+    kube-vip.io/loadbalancerIPs: "10.115.199.124"
 spec:
   ports:
   - port: 514
