@@ -13,11 +13,8 @@ for better loadbalancing to pods (exposed with multiple VIPs - ergo RR-DNS) runn
 
 > `kube-vip` itself must be running with the flag `svc_election` set to `true` 
 
-Successfully tested with `kube-vip` version up to `v0.5.12` and `kube-vip-cloud-provider` up to `v0.0.5` - so far I've seen no real problems.
+Successfully tested with `kube-vip` **v0.8.2** and `kube-vip-cloud-provider` up to **v0.0.10** - so far I've seen no real problems.
 
-> Currently the annotation `kube-vip.io/loadbalancerIPs` and `spec.loadBalancerIP` with the same VIP configured, must be used to make it work correctly!
-
-With kube-vip v0.6.0 there is currently an issue resulting in unexpected behaviour - see https://github.com/kube-vip/kube-vip/issues/563!
 
 ## Workload examples
 
@@ -45,9 +42,11 @@ A simple echoserver example.
 
 * possibly a few test-cases are not covered
 * currently all logs are written to console, so if you send logs via syslog too and scrape logs of pods - logs might be duplicated
-* the watcher is now also working with new `kube-vip.io/loadbalancerIPs` annotation instead of only depending on `service.spec.loadbalancerIP` 
-  but BOTH must be currently configured in service to make it work correctly!
 * find better way to check if rebalancing is really needed :| - currently we patch the lease in some cases even though it's not really needed
+
+## Fixed Issues
+
+* This https://github.com/kube-vip/kube-vip/issues/563 seems to be fixed - as noted before the latest tests with `kube-vip` **v0.8.2** and `kube-vip-cloud-provider` **v0.0.10** running on Kubernetes v1.29.7 are looking fine. Also there is no need anymore for setting the annotation `kube-vip.io/loadbalancerIPs` and `spec.loadBalancerIP` with the same VIP in services. Using only `kube-vip.io/loadbalancerIPs` works now.
 
 # Libraries for Logging and Locking
 
@@ -58,7 +57,7 @@ One of my first "modules", it works, but can certainly be done better.
 ### cplogging.py
 If you want to use it as standalone plugin, following Pyhton modules are needed:
 
-    pip install coloredlogs 
+`pip install coloredlogs`
 
 ### lockJob.py
 If you want to use it you need the cplogging.py. Besides this plugin uses also a
@@ -146,3 +145,6 @@ autodiscover:
 * v0.10 - 2023-05-16
   - added fix so it should also work with the new annotation
   - updated `workload-examples` to reflect notes from "Known Issues"
+* v0.11 - 2024-08-09
+  - set the connection timeout to the kubernetes-api to 1800 seconds - this should fix unresponsive kube-vip-watcher pods
+  - updated `Dockerfile` to use latest available Python image `python:3.12.5-slim-bookworm`

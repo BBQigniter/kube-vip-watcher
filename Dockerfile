@@ -1,4 +1,4 @@
-FROM python:3.11.3-slim-bullseye
+FROM python:3.12.5-slim-bookworm
 
 # install a few things we need for running this stuff or could be used for debugging
 RUN apt-get update && apt-get install -y vim procps curl

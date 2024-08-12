@@ -401,8 +401,9 @@ def main():
     logger_name = "main"
     logger = Cplogging(logger_name)
     
-    # timeout_seconds=0 ... the connection will be closed by Kubernetes after about 1 hour
-    for item in w.stream(v1_core.list_pod_for_all_namespaces, timeout_seconds=0):
+    # timeout_seconds=0 ...... the connection will be closed by Kubernetes after about 1 hour
+    # timeout_seconds=1800 ... the connection should reconnect after 30 minutes
+    for item in w.stream(v1_core.list_pod_for_all_namespaces, timeout_seconds=1800):
         try:
             # first we get pods where we need the VIP balanced
             if bool(item['object'].metadata.annotations['kubeVipBalanceIP']):
